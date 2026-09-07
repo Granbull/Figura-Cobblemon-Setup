@@ -1,0 +1,10 @@
+{
+  "name": "Blankmon",
+  "description": "Blankmon from cobblemon   \nUses the GS animblend library and Katt keybind config",
+  "authors": [
+    "the Cobblemon Team", "kcin2001", "Granbull", "Grandpa Scout", "Katt"
+  ],
+  "color": "#ffffff",
+  "comment": "replace 'Standard' with which poser file that fits closest for your pokemon",
+  "autoScripts": ["Pokemon/pokemon", "Poser/priority", "Poser/Standard"]
+}

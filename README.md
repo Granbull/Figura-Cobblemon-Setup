@@ -31,7 +31,3 @@ Based on the base script of kcin2001, with new fixes and a handy GUI!
 • Fix missing textures that are not embedded to the avatar (such as Miltank).
 
 • Add a "cry" instruction to Pokémon who don't already have one set up (your "Custom Cry" won't work if this is the case)
-
-• Add "quirks" to your Pokémon
-
-• Add animated textures
