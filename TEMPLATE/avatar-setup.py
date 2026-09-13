@@ -2735,6 +2735,19 @@ class AvatarBuilderApp:
                 
                 modified_json = False
                 
+                if self.fixes_vars["convert_generic"].get() and not self.fixes_vars["clean_dedup_textures"].get():
+                    if "textures" in model_data and isinstance(model_data["textures"], list):
+                        proj_w = model_data.get("resolution", {}).get("width", 64)
+                        proj_h = model_data.get("resolution", {}).get("height", 64)
+                        for texture in model_data["textures"]:
+                            if isinstance(texture, dict):
+                                tw = texture.get("width") or proj_w
+                                th = texture.get("height") or proj_h
+                                if texture.get("uv_height", th) < th or texture.get("uv_width", tw) < tw:
+                                    texture["uv_width"] = tw
+                                    texture["uv_height"] = th
+                                    modified_json = True
+
                 if self.fixes_vars["base_texture_mapping"].get() and is_non_generic_model:
                     # Push shiny and pattern textures to the bottom so the base texture is (hopefully) at index 0 (Fixes Porygon, Arbok)
                     if "textures" in model_data and len(model_data["textures"]) > 0:
@@ -2772,12 +2785,6 @@ class AvatarBuilderApp:
                     new_textures = []
                     old_to_new_idx = {}
                     
-                    anim_tex_names = {
-                        item.get("animtexname", "").strip().lower()
-                        for item in getattr(self, "anim_textures_data", [])
-                        if isinstance(item, dict) and item.get("animtexname")
-                    }
-                    
                     for old_idx, texture in enumerate(model_data["textures"]):
                         if isinstance(texture, dict):
                             tex_w = texture.get("width")
@@ -2811,19 +2818,11 @@ class AvatarBuilderApp:
                                         
                             tex_w = tex_w or proj_w
                             tex_h = tex_h or proj_h
-                            uv_w = texture.get("uv_width", tex_w)
-                            uv_h = texture.get("uv_height", tex_h)
-                            tex_name_clean = texture.get("name", "").strip().lower()
 
-                            is_declared_animated = tex_name_clean in anim_tex_names
-                            is_subframe_uv = (uv_h < tex_h) or (uv_w < tex_w)
-
-                            if not is_declared_animated and not is_subframe_uv:
-                                if (tex_w != tex_h and uv_w == uv_h and uv_h >= tex_h and uv_w >= tex_w) or (uv_h > tex_h) or (uv_w > tex_w):
-                                    if texture.get("uv_width") != tex_w or texture.get("uv_height") != tex_h:
-                                        texture["uv_width"] = tex_w
-                                        texture["uv_height"] = tex_h
-                                        modified_json = True
+                            if texture.get("uv_width") != tex_w or texture.get("uv_height") != tex_h:
+                                texture["uv_width"] = tex_w
+                                texture["uv_height"] = tex_h
+                                modified_json = True
                                 
                             tex_name = texture.get("name", "").strip().lower()
                             if tex_name and tex_name in seen_names:
