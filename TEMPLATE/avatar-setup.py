@@ -17,43 +17,34 @@ def fix_instruction_script(expr):
     if not isinstance(expr, str):
         return expr
 
-    # Clean up non-ASCII, newlines, and backslashes
     expr = re.sub(r'[^\x00-\x7F]+', '', expr)
     expr = expr.replace('\n', ' ').replace('\r', ' ').replace('\\', '')
     expr = expr.strip()
     if not expr:
         return ""
 
-    # Extract statements from Molang conditionals directly
     # e.g. q.has_entity ? { q.sound('wing_flap.medium'); }; -> KeySound('wing_flap.medium');
-    # or q.is_gliding ? { q.sound('fly'); }
     expr = re.sub(r'.+?\s*\?\s*{\s*(.+?)\s*;?\s*}\s*;?', r'\1;', expr)
 
-    # Convert q.sound to the avatar's KeySound function
     expr = expr.replace("q.sound", "KeySound")
 
-    # Fix `time` / `life_time` -> `q.anim_time`
     expr = re.sub(r'(?<![a-zA-Z0-9_.])time\b', 'q.anim_time', expr)
     expr = re.sub(r'\b(?:q\.|query\.)?life_time\b', 'q.anim_time', expr, flags=re.IGNORECASE)
 
-    # Fix Molang logical operators -> Lua logical operators
     expr = expr.replace('&&', ' and ')
     expr = expr.replace('||', ' or ')
     expr = expr.replace('!=', ' ~= ')
 
-    # Fix numeric booleans like `!0` (true -> 1) and `!1` (false -> 0) BEFORE general `!` replacement
     expr = re.sub(r'!\s*0\b', '1', expr)
     expr = re.sub(r'!\s*1\b', '0', expr)
     expr = re.sub(r'!(?!=)', ' not ', expr)
 
-    # Fix uppercase Molang variables (e.g., Q.anim_time -> q.anim_time)
     expr = re.sub(r'\bq\.', 'q.', expr, flags=re.IGNORECASE)
     expr = re.sub(r'\bquery\.', 'query.', expr, flags=re.IGNORECASE)
     expr = re.sub(r'\bv\.', 'v.', expr, flags=re.IGNORECASE)
     expr = re.sub(r'\bvariable\.', 'variable.', expr, flags=re.IGNORECASE)
 
     expr = expr.strip()
-    # Ensure statement ends with semicolon if it's a call like KeySound(...)
     if expr and not expr.endswith(';') and not expr.endswith('}'):
         expr += ';'
 
@@ -66,56 +57,41 @@ def fix_math_expr(expr):
 
     stripped = expr.strip()
     try:
-        # If the expression is just a simple number (e.g., "-5", "3.14"), 
-        # return it as-is to prevent it from being compiled as a math operation
         float(stripped)
         return stripped
     except ValueError:
         pass
 
-    # Strip non-ASCII characters
     expr = re.sub(r'[^\x00-\x7F]+', '', expr)
 
-    # Clean up newlines and backslashes
     expr = expr.replace('\n', ' ').replace('\r', ' ')
     expr = expr.replace('\\', '')
     
-    # Fix stray equals signs (truncate them and anything after, as they invalidate math)
     expr = re.sub(r'(?<![=<>!~])=(?!=).*', '', expr)
 
-    # Remove unary plus (invalid in Lua)
     expr = re.sub(r'^\s*\+', '', expr)
     expr = re.sub(r'([+\-*/<>=(,])\s*\+', r'\1', expr)
     
-    # Fix unary minus at the start of the expression to avoid block parsing errors
     expr = re.sub(r'^\s*-(?=[a-zA-Z(])', '0-', expr)
 
     # Fix missing operators causing "unexpected symbol 287 (ğ)" (Token ID 287 is <number>, thanks kcin)
-    # E.g. `q.r.pitch(0)30` -> `q.r.pitch(0) + 30`
     expr = re.sub(r'\)\s*(?=[0-9]|q\.|math\.|v\.|query\.)', ') + ', expr)
     expr = re.sub(r'([0-9])\s*(?=q\.|math\.|v\.|query\.)', r'\1 + ', expr)
-    # Fix implicit multiplication like `30(-1)` -> `30 * (-1)`
     expr = re.sub(r'([0-9])\s*(?=\()', r'\1 * ', expr)
     
-    # Fix hanging operators before closing parenthesis (e.g. `55+)` -> `55)`)
     expr = re.sub(r'([+\-*/])\s*\)', ')', expr)
 
-    # Fix `time` -> `q.anim_time` (Prevents Lua from calling the global time() function)
     expr = re.sub(r'(?<![a-zA-Z0-9_.])time\b', 'q.anim_time', expr)
-    # Fix `life_time` (e.g., q.life_time or query.life_time or life_time) -> `q.anim_time`
     expr = re.sub(r'\b(?:q\.|query\.)?life_time\b', 'q.anim_time', expr, flags=re.IGNORECASE)
     
-    # Fix Molang logical operators -> Lua logical operators
     expr = expr.replace('&&', ' and ')
     expr = expr.replace('||', ' or ')
     expr = expr.replace('!=', ' ~= ')
     
-    # Fix numeric booleans like `!0` (true -> 1) and `!1` (false -> 0) BEFORE general `!` replacement
     expr = re.sub(r'!\s*0\b', '1', expr)
     expr = re.sub(r'!\s*1\b', '0', expr)
     expr = re.sub(r'!(?!=)', ' not ', expr)
     
-    # Fix malformed numbers with double decimals like `0.1.5` -> `0.15`
     expr = re.sub(r'([0-9]+\.[0-9]+)\.([0-9]+)', r'\1\2', expr)
     
     # UGLY HARDCODING BLOCK!!!
@@ -126,36 +102,27 @@ def fix_math_expr(expr):
     # Fixes Cyndaquil line and Blaziken's fire from rotating side to side
     expr = re.sub(r'-\s*1\s*\)\s*\+\s*[0-9.]+\s*\*\s*\([^\n\r]*', '', expr)
 
-    # Fix ternary operators `? :` -> `and` `or` (Prevents Lua syntax errors)
     if '?' in expr and ':' in expr:
         expr = re.sub(r'\s*\?\s*', ' and ', expr)
         expr = re.sub(r'\s*:\s*', ' or ', expr)
         
-    # Fix missing parentheses on function calls (e.g. q.r.yaw_change -> q.r.yaw_change())
     expr = re.sub(r'(q\.r\.[a-zA-Z0-9_]+)(?![a-zA-Z0-9_.]|\()', r'\g<1>()', expr)
     expr = re.sub(r'\b(math\.random)(?![a-zA-Z0-9_]|\()', r'\g<1>()', expr, flags=re.IGNORECASE)
     
-    # Fix broken clamps with empty arguments like `,-,`
     expr = re.sub(r',\s*-\s*,', ', 0,', expr)
     expr = re.sub(r',\s*\+\s*,', ', 0,', expr)
     
-    # Fix missing arguments at the end of functions like `,-,)` or `,)` -> `, 0)`
     expr = re.sub(r',\s*[-+]?\s*\)', ', 0)', expr)
     
-    # Fix math typos and case sensitivity (e.g., Math.sin -> math.sin)
-    # Note: sin and cos must map to Math.sin and Math.cos for degree conversions
     expr = re.sub(r'\b(?:math|ath|mth|mah|mat)\.(sin|cos|clamp|abs|pi|random|round|ceil|floor|min|max|pow|sqrt|exp|mod|fmod)\b', lambda m: f"Math.{m.group(1).lower()}" if m.group(1).lower() in ['sin', 'cos'] else f"math.{m.group(1).lower()}", expr, flags=re.IGNORECASE)
     
-    # Fix missing parens for math functions
     expr = re.sub(r'\b(math\.(?:sin|cos|clamp|abs|pi|random|round|ceil|floor|min|max|pow|sqrt|exp|mod|fmod))(?=q\.|math\.|v\.|query\.)', r'\1(', expr, flags=re.IGNORECASE)
 
-    # Fix uppercase Molang variables (e.g., Q.anim_time -> q.anim_time)
     expr = re.sub(r'\bq\.', 'q.', expr, flags=re.IGNORECASE)
     expr = re.sub(r'\bquery\.', 'query.', expr, flags=re.IGNORECASE)
     expr = re.sub(r'\bv\.', 'v.', expr, flags=re.IGNORECASE)
     expr = re.sub(r'\bvariable\.', 'variable.', expr, flags=re.IGNORECASE)
 
-    # Balance parentheses (fixes extra/dangling parentheses)
     open_count = 0
     res = []
     for char in expr:
@@ -172,7 +139,6 @@ def fix_math_expr(expr):
     if open_count > 0:
         expr += ')' * open_count
 
-    # Fix hanging operators at the end of expressions
     expr = re.sub(r'([+\-*/<>=(,]\s*)+$', '', expr)
     
     return expr.strip()
@@ -183,7 +149,6 @@ global_fix_math_expr = fix_math_expr
 
 def global_search_outliner(uuid_to_name, nodes, current_path, search_target):
     for node in nodes:
-        # Ignore any cubes and meshes (strings), take groups (dicts)
         if isinstance(node, dict):
             name = node.get("name", "")
             if not name and "uuid" in node:
@@ -403,7 +368,6 @@ def extract_trig_args(expr):
 
 def get_expr_frequencies(expr):
     freqs = []
-    # Fast regex matches for standard Cobblemon patterns
     m1 = re.findall(r'(?:q|query)\.anim_time\s*\*\s*90\s*\*\s*([0-9.]+)', expr)
     for f in m1: freqs.append(float(f))
     m2 = re.findall(r'90\s*\*\s*([0-9.]+)\s*\*\s*(?:q|query)\.anim_time', expr)
@@ -414,7 +378,6 @@ def get_expr_frequencies(expr):
         if val != 90.0:
             freqs.append(val / 90.0)
 
-    # Numerical derivative for arbitrary nested Molang trigonometric formulas
     for arg in extract_trig_args(expr):
         try:
             v1 = eval_molang_val(arg, 1.0)
@@ -449,11 +412,9 @@ def calculate_loop_length(anim):
             if not kf_has_math:
                 max_non_math_t = max(max_non_math_t, t)
 
-    # Non-math animations keep their existing length
     if not has_math:
         return existing_len
 
-    # Filter out near-zero drift frequencies (< 0.05) if primary frequencies exist
     significant_freqs = [f for f in all_freqs if f >= 0.05]
     freqs_to_use = significant_freqs if significant_freqs else all_freqs
 
@@ -475,21 +436,17 @@ def calculate_loop_length(anim):
     if math_T is None:
         math_T = 4.0
 
-    # Never truncate manual non-math keyframes
     if max_non_math_t > math_T:
         return existing_len if existing_len > 0.05 else max_non_math_t
 
     is_loop = anim.get('loop') == 'loop' or anim.get('name', '').endswith(('_idle', '_walk', '_run', '_fly', '_swim', '_dive')) or anim.get('name', '') == 'sleep'
 
     if is_loop and existing_len > 0.05:
-        # Check if existing_len is an integer multiple of math_T (e.g. 8s vs 2s)
         multiple = existing_len / math_T
         if abs(multiple - round(multiple)) < 0.02 and round(multiple) > 1:
             return math_T
-        # If existing_len is smaller than math_T, never expand an existing defined length
         if math_T >= existing_len:
             return existing_len
-        # Pure math with arbitrary existing length
         if max_non_math_t <= 0.01:
             return math_T
 
@@ -688,7 +645,6 @@ def bake_animation_math(anim, rate=6, interpolation="linear"):
             ch_has_math = any(has_math_expr(v) for kf in kfs for dp in kf.get('data_points', []) for v in dp.values())
 
             if ch_has_math:
-                # Pre-clean math expressions on this channel's keyframes once before sampling
                 for kf in kfs:
                     for dp in kf.get('data_points', []):
                         if isinstance(dp, dict):
@@ -712,11 +668,9 @@ def bake_animation_math(anim, rate=6, interpolation="linear"):
                         'uuid': str(uuid.uuid4())
                     })
 
-                # If looping animation, guarantee exact seam match between start and end
                 if is_loop and len(baked_channel_kfs) > 1:
                     baked_channel_kfs[-1]['data_points'] = copy.deepcopy(baked_channel_kfs[0]['data_points'])
 
-                # Prune consecutive identical keyframes (3+ in a row -> delete middle ones)
                 baked_channel_kfs = prune_consecutive_keyframes(baked_channel_kfs)
 
                 new_kfs.extend(baked_channel_kfs)
@@ -849,7 +803,6 @@ def optimize_model_data(model_data):
                         pruned = prune_consecutive_keyframes(ch_kfs)
                         total_kfs_pruned += (len(ch_kfs) - len(pruned))
 
-                        # Lossless identity channel pruning (channels that only equal rest pose)
                         if is_channel_identity(pruned, ch):
                             total_kfs_pruned += len(pruned)
                             channels_pruned += 1
@@ -903,7 +856,6 @@ def optimize_model_data(model_data):
                         pruned = prune_consecutive_keyframes(ch_kfs)
                         total_kfs_pruned += (len(ch_kfs) - len(pruned))
 
-                        # Lossless identity channel pruning
                         if is_channel_identity(pruned, ch):
                             total_kfs_pruned += len(pruned)
                             channels_pruned += 1
@@ -1055,12 +1007,10 @@ class AvatarBuilderApp:
         if sys.platform == 'win32' and os.path.exists(self.icon_path):
             self.root.iconbitmap(default=self.icon_path)
             
-        # Avatar metadata
         self.avatar_name_var = tk.StringVar(value="")
         self.icon_color_var = tk.StringVar(value="#ffffff")
         self.player_icon_var = tk.StringVar(value="")
 
-        # Default values for advanced settings
         self.scale_var = tk.StringVar(value="1")
         self.camheight_var = tk.StringVar(value="1")
         self.nameplatepivot_var = tk.StringVar(value="1")
@@ -1078,7 +1028,6 @@ class AvatarBuilderApp:
         self.quirks_data = []
         self.status_timer = None
 
-        # Modular Fixes Variables
         self.fixes_vars = {
             "bake_math": self.bake_math_var,
             "fix_math_expr": tk.BooleanVar(value=True),
@@ -1094,7 +1043,6 @@ class AvatarBuilderApp:
             "emissive_name": tk.BooleanVar(value=True),
         }
         
-        # Checking if there's a valid avatar
         def is_valid_avatar_dir(path):
             return os.path.exists(os.path.join(path, "avatar.json")) and os.path.exists(os.path.join(path, "config.lua"))
 
@@ -1118,7 +1066,6 @@ class AvatarBuilderApp:
         main_input_frame = tk.Frame(self.root)
         main_input_frame.pack(pady=(15, 5))
         
-        # Model Selection
         lbl_model = tk.Label(main_input_frame, text="Select .bbmodel:")
         lbl_model.grid(row=0, column=0, columnspan=2, pady=(0, 2))
         
@@ -1132,7 +1079,6 @@ class AvatarBuilderApp:
         tip_model = "Select the main .bbmodel containing your Pokémon's 3D model and animations."
         Tooltip(lbl_model, tip_model)
         
-        # Name Field
         lbl_name = tk.Label(main_input_frame, text="Name:")
         lbl_name.grid(row=2, column=0, columnspan=2, pady=(8, 2))
         self.name_entry = tk.Entry(main_input_frame, textvariable=self.avatar_name_var, width=33, font=("Segoe UI", 9))
@@ -1141,7 +1087,6 @@ class AvatarBuilderApp:
         tip_name = "The display name of your avatar in the Figura wardrobe menu."
         Tooltip(lbl_name, tip_name)
 
-        # Description Field
         lbl_desc = tk.Label(main_input_frame, text="Description:")
         lbl_desc.grid(row=4, column=0, columnspan=2, pady=(8, 2))
         self.desc_text = tk.Text(main_input_frame, width=33, height=2, wrap=tk.WORD, font=("Segoe UI", 9))
@@ -1152,7 +1097,6 @@ class AvatarBuilderApp:
         tip_desc = "The description shown for your avatar in the Figura wardrobe menu."
         Tooltip(lbl_desc, tip_desc)
 
-        # Poser Selection
         lbl_poser = tk.Label(main_input_frame, text="Select Poser:")
         lbl_poser.grid(row=6, column=0, columnspan=2, pady=(8, 2))
         
@@ -1165,7 +1109,6 @@ class AvatarBuilderApp:
         tip_poser = "Determines which animation poser script to use based on the current animation set."
         Tooltip(lbl_poser, tip_poser)
         
-        # Head Path
         lbl_head = tk.Label(main_input_frame, text="Head Group Path:")
         lbl_head.grid(row=8, column=0, columnspan=2, pady=(8, 2))
         
@@ -1184,13 +1127,11 @@ class AvatarBuilderApp:
         tip_head = "Path to the head bone/group in the model, allowing head tracking to look where the player looks."
         Tooltip(lbl_head, tip_head)
         
-        # Advanced Settings Button
         self.adv_toggle_btn = tk.Button(self.root, text="Advanced Settings ▼", command=self.toggle_advanced_settings)
         self.adv_toggle_btn.pack(pady=(15, 5))
         
         self.adv_frame = tk.Frame(self.root)
 
-        # Scale
         lbl_scale = tk.Label(self.adv_frame, text="Pokémon Scale:")
         lbl_scale.grid(row=0, column=0, sticky="e", pady=2)
         entry_scale = tk.Entry(self.adv_frame, textvariable=self.scale_var, width=10)
@@ -1198,7 +1139,6 @@ class AvatarBuilderApp:
         tip_scale = "Changes the scale of the model in-game."
         Tooltip(lbl_scale, tip_scale)
 
-        # Camera Height
         lbl_cam = tk.Label(self.adv_frame, text="Camera Height:")
         lbl_cam.grid(row=1, column=0, sticky="e", pady=2)
         entry_cam = tk.Entry(self.adv_frame, textvariable=self.camheight_var, width=10)
@@ -1206,7 +1146,6 @@ class AvatarBuilderApp:
         tip_cam = "Adjusts first-person and third-person camera eye height to match your model's height."
         Tooltip(lbl_cam, tip_cam)
 
-        # Nameplate Pivot
         lbl_np = tk.Label(self.adv_frame, text="Nameplate Pivot:")
         lbl_np.grid(row=2, column=0, sticky="e", pady=2)
         entry_np = tk.Entry(self.adv_frame, textvariable=self.nameplatepivot_var, width=10)
@@ -1214,7 +1153,6 @@ class AvatarBuilderApp:
         tip_np = "Vertical height offset for the player nameplate above your model."
         Tooltip(lbl_np, tip_np)
 
-        # Paperdoll Scale
         lbl_pdoll = tk.Label(self.adv_frame, text="Paperdoll Scale:")
         lbl_pdoll.grid(row=3, column=0, sticky="e", pady=2)
         entry_pdoll = tk.Entry(self.adv_frame, textvariable=self.pdollscale_var, width=10)
@@ -1222,7 +1160,6 @@ class AvatarBuilderApp:
         tip_pdoll = "Changes the scale of your avatar in the inventory menu and the Figura paperdoll feature."
         Tooltip(lbl_pdoll, tip_pdoll)
 
-        # Player Icon
         self.player_icon_label = tk.Label(self.adv_frame, text="Player Icon:")
         self.player_icon_label.grid(row=4, column=0, sticky="e", pady=2)
         self.player_icon_btn = tk.Button(self.adv_frame, text="Browse...", command=self.browse_player_icon)
@@ -1230,7 +1167,6 @@ class AvatarBuilderApp:
         tip_icon = "Select a custom image (.png, .jpg, etc.) to display as your avatar icon in the Figura menu and player list (TAB). Automatically squared and optimized."
         Tooltip(self.player_icon_label, tip_icon)
 
-        # Figura Icon Color
         lbl_color = tk.Label(self.adv_frame, text="Figura Icon Color:")
         lbl_color.grid(row=5, column=0, sticky="e", pady=2)
         color_frame = tk.Frame(self.adv_frame)
@@ -1251,7 +1187,6 @@ class AvatarBuilderApp:
         tip_col = "Changes the color of the Figura triangle next to your name and the color of the text in the Figura menu while your avatar is selected."
         Tooltip(lbl_color, tip_col)
 
-        # Speed Scale
         lbl_speedscale = tk.Label(self.adv_frame, text="Speed Scale:")
         lbl_speedscale.grid(row=6, column=0, sticky="e", pady=2)
         speed_frame = tk.Frame(self.adv_frame)
@@ -1275,7 +1210,6 @@ class AvatarBuilderApp:
         self.toggle_speed_fn = toggle_speed
         toggle_speed()
 
-        # Custom Cry
         lbl_cry = tk.Label(self.adv_frame, text="Custom Cry:")
         lbl_cry.grid(row=7, column=0, sticky="e", pady=2)
         cry_frame = tk.Frame(self.adv_frame)
@@ -1298,13 +1232,24 @@ class AvatarBuilderApp:
         def toggle_cry():
             if self.customcry_var.get():
                 cry_opt.pack(side=tk.LEFT)
+                if not self.cryfile_var.get():
+                    model_file = self.model_var.get()
+                    if model_file:
+                        modelname = model_file.rsplit(".bbmodel", 1)[0]
+                        base_cry_name = modelname.split("_")[0]
+                        expected_cry = os.path.join(self.base_path, f"{base_cry_name}_cry.ogg")
+                        if os.path.exists(expected_cry):
+                            self.cryfile_var.set(expected_cry)
+                        else:
+                            legacy_cry = os.path.join(self.base_path, f"{modelname}_cry.ogg")
+                            if os.path.exists(legacy_cry):
+                                self.cryfile_var.set(legacy_cry)
             else:
                 cry_opt.pack_forget()
         self.toggle_cry_fn = toggle_cry
         self.cry_btn = cry_btn
         toggle_cry()
 
-        # Extra Animations
         lbl_extra = tk.Label(self.adv_frame, text="Extra Animations:")
         lbl_extra.grid(row=8, column=0, sticky="e", pady=2)
         chk_extra = tk.Checkbutton(self.adv_frame, variable=self.extra_anims_var)
@@ -1312,7 +1257,6 @@ class AvatarBuilderApp:
         tip_extra = "Enables the 'Extras' poser, which adds the 'riding', 'ground_idle_sneak' and 'ground_walk_sneak' animations."
         Tooltip(lbl_extra, tip_extra)
 
-        # Action Buttons
         btn_fixes = tk.Button(self.adv_frame, text="Fixes...", command=self.open_fixes_dialog, width=28)
         btn_fixes.grid(row=9, column=0, columnspan=2, pady=(8, 2))
 
@@ -1328,15 +1272,12 @@ class AvatarBuilderApp:
         self.adv_frame.grid_columnconfigure(1, minsize=190)
         self.adv_expanded = False
         
-        # Run Button
         self.run_btn = tk.Button(self.root, text="Run Setup", command=self.run_setup, width=15)
         self.run_btn.pack(pady=(20, 5))
         
-        # Status Label
         self.status_label = tk.Label(self.root, text="", fg="green", wraplength=300)
         self.status_label.pack(pady=(0, 5))
 
-        # Footer
         footer_text = "Based on the work of kcin2001\nMade with ♥ by Granbull"
         tk.Label(self.root, text=footer_text, fg="grey", font=("Segoe UI", 8)).pack(side=tk.BOTTOM, pady=(0, 5))
 
@@ -1412,7 +1353,6 @@ class AvatarBuilderApp:
             try:
                 with open(config_path, "r", encoding="utf-8") as f:
                     content = f.read()
-                # Check for "animatedParts" (not animatedPart)
                 if re.search(r'\banimatedParts\b', content):
                     has_animated_parts = True
             except Exception:
@@ -1533,10 +1473,8 @@ class AvatarBuilderApp:
             if "uuid" not in tex:
                 tex["uuid"] = "51567ef7-2ebd-9c75-e86e-c49e3c4b3b6c"
 
-            # Overwrite textures array so multiple copies don't accumulate
             portrait_data["textures"] = [tex]
 
-            # Update north face of the "image" cube
             elements = portrait_data.get("elements", [])
             target_cube = None
             for el in elements:
@@ -1557,7 +1495,6 @@ class AvatarBuilderApp:
             json.dump(portrait_data, f, separators=(',', ':'), ensure_ascii=False)
 
     def process_and_save_player_icon(self, selected_path, target_png_path):
-        # Try PIL/Pillow
         try:
             import importlib
             pil_image = importlib.import_module("PIL.Image")
@@ -1566,7 +1503,6 @@ class AvatarBuilderApp:
                 orig_w, orig_h = img.size
                 max_side = max(orig_w, orig_h)
                 
-                # Fit centered onto a transparent square canvas if non-square
                 if orig_w != orig_h:
                     square_img = pil_image.new("RGBA", (max_side, max_side), (0, 0, 0, 0))
                     offset = ((max_side - orig_w) // 2, (max_side - orig_h) // 2)
@@ -1574,7 +1510,6 @@ class AvatarBuilderApp:
                 else:
                     square_img = img
 
-                # Downscale to 128x128 only if it exceeds 128
                 if max_side > 128:
                     resample = getattr(pil_image, "Resampling", pil_image).LANCZOS
                     square_img = square_img.resize((128, 128), resample)
@@ -1587,7 +1522,6 @@ class AvatarBuilderApp:
         except Exception:
             pass
 
-        # Tkinter PhotoImage fallback
         try:
             tk_src = tk.PhotoImage(file=selected_path, master=self.root)
             orig_w = tk_src.width()
@@ -1615,7 +1549,6 @@ class AvatarBuilderApp:
         except Exception:
             pass
 
-        # Direct copy fallback
         shutil.copy2(selected_path, target_png_path)
         try:
             with open(target_png_path, "rb") as f:
@@ -1708,22 +1641,22 @@ class AvatarBuilderApp:
 
         fix_groups = [
             ("Math & Animation Fixes", [
-                ("bake_math", "Bake Math Animations", "Solves math curves and bakes them into numeric keyframes. Fixes the 'Script overran resource limits!' error on 'Default' and 'High' permissions, but adds a few kb to the avatar."),
-                ("fix_math_expr", "Fix Math Syntax Errors", "Resolves operators, missing operands (e.g. *-10), NaN values, and more. Fixes many 'syntax error' keyframes."),
-                ("sound_instruction_keyframes", "Fix Sound & Instruction Keyframes", "Converts Bedrock sound effect channels and translates Molang instruction scripts into valid Figura Lua KeySound calls. Fixes crashes when using models with sound effects, like flying Pokémon's wing flaps."),
+                ("bake_math", "Bake Math Animations", "Bakes math curves into normal keyframes. Fixes 'Script overran resource limits!' errors, but adds a few kb to the avatar."),
+                ("fix_math_expr", "Fix Math Syntax Errors", "Fixes syntax errors in Molang math (missing operands, NaN, operators, etc.)."),
+                ("sound_instruction_keyframes", "Fix Sound & Instruction Keyframes", "Converts Bedrock sound channels and Molang instructions to KeySound. Fixes crashes on flying Pokémon wing flaps and sound effects."),
                 ("auto_loop_anims", "Auto-Loop Standard Animations", "Sets standard animation cycles (idle, walk, run, fly, swim, sleep) to loop continuously. Fixes some t-posing problems."),
                 ("strip_anim_prefix", "Strip Animation Prefixes", "Removes prefixes (e.g. 'animation.pokemon.') from animation names. Fixes some t-posing problems."),
             ]),
             ("Model & Structure Fixes", [
                 ("convert_generic", "Convert to Generic Model", "Converts the model format to Generic."),
-                ("reserved_names", "Sanitize Reserved Group Names", "Lowercases reserved group names (Head, Body, LeftArm, etc.). Fixes certain invisible body parts or parts following vanilla movement."),
-                ("mesh_conflicts", "Resolve Mesh Name Collisions", "Renames cubes/meshes that share the exact same name as their parent group. Fixes certain cases of animation/script target ambiguity."),
-                ("prune_empty", "Optimize Model Structure", "Prunes redundant keyframes, zero-valued identity channels and empty bone animators. Slightly reduces file size."),
+                ("reserved_names", "Fix Reserved Group Names", "Lowercases reserved group names (Head, Body, LeftArm, etc.). Fixes certain invisible body parts or parts following vanilla movement."),
+                ("mesh_conflicts", "Fix Mesh Name Conflicts", "Renames meshes that share the same name as their parent group. Fixes animation and script issues."),
+                ("prune_empty", "Clean Up Empty Animation Data", "Removes redundant keyframes, identity channels, and empty bone animators to slightly reduce file size."),
             ]),
             ("Texture Fixes", [
                 ("base_texture_mapping", "Fix Base Texture & Face Mapping", "Sorts the base texture to slot 0 and standardizes cube faces to use it. Fixes accidental shiny or texture-swapped faces."),
-                ("clean_dedup_textures", "Clean & Deduplicate Textures", "Synchronizes UV dimensions with texture resolution to fix stretching, and merges duplicate texture slots. Fixes wrong UVs after Bedrock -> Generic conversion."),
-                ("emissive_name", "Normalize Emissive Names", "Renames '_emissive.png' to '_e.png' to conform to Figura's naming standard."),
+                ("clean_dedup_textures", "Clean & Deduplicate Textures", "Fixes UV stretching and merges duplicate textures after Bedrock -> Generic conversion."),
+                ("emissive_name", "Fix Emissive Texture Names", "Renames '_emissive.png' to '_e.png' to match Figura's standard."),
             ])
         ]
 
@@ -1838,13 +1771,11 @@ class AvatarBuilderApp:
         avatar_path = os.path.join(self.base_path, "avatar.json")
         config_path = os.path.join(self.base_path, "config.lua")
 
-        # 1. Read avatar.json for Name, Description, Color, Poser, and Extra Animations
         if os.path.exists(avatar_path):
             try:
                 with open(avatar_path, "r", encoding="utf-8-sig") as f:
                     meta = json.load(f)
 
-                # Fresh boot detection: blank name or "Blankmon"
                 current_name = str(meta.get("name", "")).strip()
                 is_fresh_boot = current_name.lower() in ("", "blankmon")
 
@@ -1862,7 +1793,6 @@ class AvatarBuilderApp:
 
                 self.on_desc_modified()
 
-                # Icon Color
                 icon_col = str(meta.get("color", "#ffffff")).strip()
                 if not icon_col.startswith("#"):
                     icon_col = "#" + icon_col
@@ -1900,7 +1830,6 @@ class AvatarBuilderApp:
             except Exception:
                 pass
 
-        # Check avatar icon (avatar.png) and update UI state
         if os.path.exists(os.path.join(self.base_path, "avatar.png")):
             self.player_icon_var.set("avatar.png")
         else:
@@ -1908,7 +1837,6 @@ class AvatarBuilderApp:
         self.update_portrait_ui_state()
         self.update_animated_textures_ui_state()
 
-        # Read config.lua for Head Path and Advanced Options
         if not os.path.exists(config_path):
             return
 
@@ -1918,12 +1846,10 @@ class AvatarBuilderApp:
         except Exception:
             return
 
-        # Check if head path is uninitialized template placeholder
         head_match = re.search(r'\["head"\]\s*=\s*([^,\n\r]+)', config_content)
         if head_match:
             head_val = head_match.group(1).strip()
             if "NAME_HERE" not in head_val and "PATH.TO.HEAD" not in head_val:
-                # Extract head group suffix
                 prefix = self.head_prefix_var.get()
                 prefix_no_dot = prefix[:-1] if prefix.endswith(".") else prefix
                 if head_val.startswith(prefix):
@@ -1934,7 +1860,6 @@ class AvatarBuilderApp:
                     stripped = re.sub(r'^models(?:\[["\'].*?["\']\]|\.[a-zA-Z0-9_-]+)\.?', '', head_val)
                     self.head_var.set(stripped)
 
-        # Parse Advanced Options from config.lua
         def set_str_var(var, pattern):
             m = re.search(pattern, config_content)
             if m:
@@ -1962,11 +1887,15 @@ class AvatarBuilderApp:
             model_file = self.model_var.get()
             if model_file:
                 modelname = model_file.rsplit(".bbmodel", 1)[0]
-                expected_cry = os.path.join(self.base_path, f"{modelname}_cry.ogg")
+                base_cry_name = modelname.split("_")[0]
+                expected_cry = os.path.join(self.base_path, f"{base_cry_name}_cry.ogg")
                 if os.path.exists(expected_cry):
                     self.cryfile_var.set(expected_cry)
+                else:
+                    legacy_cry = os.path.join(self.base_path, f"{modelname}_cry.ogg")
+                    if os.path.exists(legacy_cry):
+                        self.cryfile_var.set(legacy_cry)
 
-        # Parse Animated Textures (only if template supports animatedParts)
         self.anim_textures_data.clear()
         if re.search(r'\banimatedParts\b', config_content):
             parts_match = re.findall(r'\{\s*part\s*=\s*([^,\n\r]+),\s*animtexname\s*=\s*["\']([^"\']+)["\'],\s*framenumber\s*=\s*([0-9]+),\s*animfps\s*=\s*([0-9.]+),\s*animemissive\s*=\s*(true|false)\s*\}', config_content)
@@ -1982,7 +1911,6 @@ class AvatarBuilderApp:
                         })
         self.update_animated_textures_ui_state()
 
-        # Parse Quirks
         self.quirks_data.clear()
         for line in config_content.splitlines():
             line_str = line.strip()
@@ -2114,7 +2042,6 @@ class AvatarBuilderApp:
             model_path = os.path.join(self.base_path, model_file)
             with open(model_path, "r", encoding="utf-8") as f:
                 model_text = f.read()
-            # Fix NaN and -NaN errors
             model_text = re.sub(r'-?\bNaN\b', "0", model_text)
             model_data = json.loads(model_text)
             
@@ -2127,7 +2054,6 @@ class AvatarBuilderApp:
             
             def search_outliner(nodes, current_path, search_target):
                 for node in nodes:
-                    # Ignore any cubes and meshes (strings), take groups (dicts)
                     if isinstance(node, dict):
                         name = node.get("name", "")
                         if not name and "uuid" in node:
@@ -2145,17 +2071,14 @@ class AvatarBuilderApp:
                                 return result
                 return None
                 
-            # Try to find exactly what was typed (important for groups with dots like "arm.L")
             found_path = global_search_outliner(uuid_to_name, outliner, [], original_target)
             
-            # If not found, check if it's a previously formatted path and extract the base name
             if not found_path and display_target != original_target:
                 found_path = global_search_outliner(uuid_to_name, outliner, [], display_target)
             
             if found_path:
                 formatted_suffix = ""
                 for p in found_path:
-                    # Standard lua dot notation if alphanumeric, otherwise use bracket indexing (models.granbull. vs models["granbull"].)
                     if re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', p):
                         if formatted_suffix:
                             formatted_suffix += f".{p}"
@@ -2739,7 +2662,6 @@ class AvatarBuilderApp:
         crosshair_val = "true" if self.crosshair_var.get() else "false"
             
         try:
-            # 1. Update avatar.json
             avatar_path = os.path.join(self.base_path, "avatar.json")
             with open(avatar_path, "r", encoding="utf-8") as f:
                 meta = json.load(f)
@@ -2774,7 +2696,6 @@ class AvatarBuilderApp:
             with open(avatar_path, "w", encoding="utf-8") as f:
                 json.dump(meta, f, indent=4)
                 
-            # 2. Convert .bbmodel
             model_path = os.path.join(self.base_path, model_file)
             with open(model_path, "r", encoding="utf-8") as model_f:
                 fixedmodel = model_f.read()
@@ -2793,18 +2714,14 @@ class AvatarBuilderApp:
             if self.fixes_vars["strip_anim_prefix"].get():
                 fixedmodel = re.sub(r"animations?\.[^.\"]+\.", "", fixedmodel)
             
-            # Converting to a Generic model
             if self.fixes_vars["convert_generic"].get():
                 fixedmodel = re.sub(r'"model_format":\s*"[^"]+"', '"model_format":"free"', fixedmodel)
             
             # THE GREAT MATH PURGE. lord have mercy
             if self.fixes_vars["fix_math_expr"].get():
-                # 1. Fix leading signs in strings
                 fixedmodel = re.sub(r'("[xyz]"\s*:\s*"\s*)-(?=[a-zA-Z(])', r'\g<1>0-', fixedmodel)
                 fixedmodel = re.sub(r'("[xyz]"\s*:\s*"\s*)\+(?=[a-zA-Z(])', r'\g<1>0+', fixedmodel)
-                # 2. Fix missing operands in *- (or /-, +-, --). E.g. `* -10` -> `*(0-10)`
                 fixedmodel = re.sub(r'([+\-*/])\s*-\s*([a-zA-Z_][a-zA-Z0-9_.]*|[0-9.]+)(?![a-zA-Z0-9_.]|\()', r'\g<1>(0-\g<2>)', fixedmodel)
-                # 3. Prevent crashes from unary minus/plus directly inside parentheses. E.g. `(-2)` -> `(0-2)`
                 fixedmodel = re.sub(r'\(\s*-\s*(math\.|q\.|query\.|v\.|[0-9])', r'(0-\g<1>', fixedmodel, flags=re.IGNORECASE)
                 fixedmodel = re.sub(r'\(\s*\+\s*(math\.|q\.|query\.|v\.|[0-9])', r'(\g<1>', fixedmodel, flags=re.IGNORECASE)
 
@@ -2818,7 +2735,6 @@ class AvatarBuilderApp:
                 
                 modified_json = False
                 
-                # Fix face texture mappings for non-generic models that cause texture swapping in Generic format
                 if self.fixes_vars["base_texture_mapping"].get() and is_non_generic_model:
                     # Push shiny and pattern textures to the bottom so the base texture is (hopefully) at index 0 (Fixes Porygon, Arbok)
                     if "textures" in model_data and len(model_data["textures"]) > 0:
@@ -2849,7 +2765,6 @@ class AvatarBuilderApp:
                             modified_json = True
                         uuid_to_group_name[group["uuid"]] = group["name"]
 
-                # Sync texture UV size and deduplicate textures with same name (keeping lowest index number)
                 if self.fixes_vars["clean_dedup_textures"].get() and "textures" in model_data and isinstance(model_data["textures"], list):
                     proj_w = model_data.get("resolution", {}).get("width", 64)
                     proj_h = model_data.get("resolution", {}).get("height", 64)
@@ -2868,7 +2783,6 @@ class AvatarBuilderApp:
                             tex_w = texture.get("width")
                             tex_h = texture.get("height")
                             
-                            # If width or height are missing, extract from base64 PNG header or image file
                             if not tex_w or not tex_h:
                                 src = texture.get("source", "")
                                 if isinstance(src, str):
@@ -2913,7 +2827,6 @@ class AvatarBuilderApp:
                                 
                             tex_name = texture.get("name", "").strip().lower()
                             if tex_name and tex_name in seen_names:
-                                # Duplicate texture name!!!! Delete this higher slot and map to existing lower slot
                                 old_to_new_idx[old_idx] = seen_names[tex_name]
                                 modified_json = True
                             else:
@@ -2971,84 +2884,194 @@ class AvatarBuilderApp:
                 if self.fixes_vars["mesh_conflicts"].get() and "outliner" in model_data:
                     rename_conflicts(model_data["outliner"])
 
-                if "animations" in model_data:
-                    baking_enabled = self.fixes_vars["bake_math"].get()
-                    do_auto_loop = self.fixes_vars["auto_loop_anims"].get()
-                    do_inst_scripts = self.fixes_vars["sound_instruction_keyframes"].get()
-                    do_math_fix = self.fixes_vars["fix_math_expr"].get()
+                if "animations" not in model_data or not isinstance(model_data["animations"], list):
+                    model_data["animations"] = []
 
-                    for anim in model_data["animations"]:
-                        if do_auto_loop:
-                            anim_name = anim.get("name", "")
-                            if anim_name.endswith(('_idle', '_walk', '_run', '_fly', '_swim', '_dive')) or anim_name == "sleep":
-                                if anim.get("loop") != "loop":
-                                    anim["loop"] = "loop"
-                                    modified_json = True
-                                
-                        animators = anim.get("animators")
-                        
-                        animator_list = []
-                        if isinstance(animators, dict):
-                            animator_list = animators.values()
-                        elif isinstance(animators, list):
-                            animator_list = animators
-                            
-                        for animator in animator_list:
-                            if not isinstance(animator, dict):
-                                continue
-                                
-                            # Update animation names targeting renamed meshes
-                            anim_uuid = animator.get("uuid")
-                            if anim_uuid and anim_uuid in renamed_elements:
-                                animator["name"] = renamed_elements[anim_uuid]
+                baking_enabled = self.fixes_vars["bake_math"].get()
+                do_auto_loop = self.fixes_vars["auto_loop_anims"].get()
+                do_inst_scripts = self.fixes_vars["sound_instruction_keyframes"].get()
+                do_math_fix = self.fixes_vars["fix_math_expr"].get()
+
+                for anim in model_data["animations"]:
+                    if do_auto_loop:
+                        anim_name = anim.get("name", "")
+                        if anim_name.endswith(('_idle', '_walk', '_run', '_fly', '_swim', '_dive')) or anim_name == "sleep":
+                            if anim.get("loop") != "loop":
+                                anim["loop"] = "loop"
                                 modified_json = True
-                                
-                            # ALWAYS convert Molang instruction scripts (in timeline/script/sound channels) to valid Lua
-                            # If baking is OFF, fix math expressions on transform channels (skipping plain numbers)
-                            # If baking is ON, skip transform math fixes so the baker will evaluate and overwrite them with clean numbers!
-                            for kf in animator.get("keyframes", []):
-                                if not isinstance(kf, dict):
-                                    continue
-                                ch = kf.get("channel")
-
-                                if do_inst_scripts and ch in ("timeline", "script", "sound"):
-                                    for dp in kf.get("data_points", []):
-                                        if isinstance(dp, dict):
-                                            if "script" in dp:
-                                                s = dp["script"]
-                                                if isinstance(s, str):
-                                                    new_s = fix_instruction_script(s)
-                                                    if new_s != s:
-                                                        dp["script"] = new_s
-                                                        modified_json = True
-                                            elif "effect" in dp:
-                                                kf["channel"] = "timeline"
-                                                dp["script"] = f'KeySound("{dp["effect"]}");'
-                                                del dp["effect"]
-                                                modified_json = True
-                                elif not baking_enabled and do_math_fix and ch in ("rotation", "position", "scale"):
-                                    for dp in kf.get("data_points", []):
-                                        if isinstance(dp, dict):
-                                            for coord in ("x", "y", "z"):
-                                                val = dp.get(coord)
-                                                if isinstance(val, str) and has_math_expr(val):
-                                                    new_val = fix_math_expr(val)
-                                                    if new_val != val:
-                                                        dp[coord] = new_val
-                                                        modified_json = True
-
-                    if baking_enabled:
-                        bake_rate = self.bake_rate_var.get()
-                        bake_interp = self.bake_interp_var.get()
-                        bake_report = bake_model_animations(model_data, rate=bake_rate, interpolation=bake_interp)
-                        if bake_report:
+                            
+                    animators = anim.get("animators")
+                    
+                    animator_list = []
+                    if isinstance(animators, dict):
+                        animator_list = animators.values()
+                    elif isinstance(animators, list):
+                        animator_list = animators
+                        
+                    for animator in animator_list:
+                        if not isinstance(animator, dict):
+                            continue
+                            
+                        anim_uuid = animator.get("uuid")
+                        if anim_uuid and anim_uuid in renamed_elements:
+                            animator["name"] = renamed_elements[anim_uuid]
                             modified_json = True
+                            
+                        for kf in animator.get("keyframes", []):
+                            if not isinstance(kf, dict):
+                                continue
+                            ch = kf.get("channel")
 
-                    # Model optimization (identity channel pruning, dead keyframe pruning, empty animator removal, metadata cleanup)
-                    if self.fixes_vars["prune_empty"].get():
-                        kfs_pruned, anims_pruned, ch_pruned = optimize_model_data(model_data)
-                        if kfs_pruned > 0 or anims_pruned > 0 or ch_pruned > 0:
-                            modified_json = True
+                            if do_inst_scripts and ch in ("timeline", "script", "sound"):
+                                for dp in kf.get("data_points", []):
+                                    if isinstance(dp, dict):
+                                        if "script" in dp:
+                                            s = dp["script"]
+                                            if isinstance(s, str):
+                                                new_s = fix_instruction_script(s)
+                                                if new_s != s:
+                                                    dp["script"] = new_s
+                                                    modified_json = True
+                                        elif "effect" in dp:
+                                            kf["channel"] = "timeline"
+                                            dp["script"] = f'KeySound("{dp["effect"]}");'
+                                            del dp["effect"]
+                                            modified_json = True
+                            elif not baking_enabled and do_math_fix and ch in ("rotation", "position", "scale"):
+                                for dp in kf.get("data_points", []):
+                                    if isinstance(dp, dict):
+                                        for coord in ("x", "y", "z"):
+                                            val = dp.get(coord)
+                                            if isinstance(val, str) and has_math_expr(val):
+                                                new_val = fix_math_expr(val)
+                                                if new_val != val:
+                                                    dp[coord] = new_val
+                                                    modified_json = True
+
+                base_cry_name = modelname.split("_")[0]
+                cry_anim = None
+                for a in model_data["animations"]:
+                    if isinstance(a, dict):
+                        a_name = a.get("name", "").strip().lower()
+                        if a_name == "cry" or a_name.endswith(".cry"):
+                            cry_anim = a
+                            break
+
+                def has_cry_inst(anim_obj):
+                    animators = anim_obj.get("animators")
+                    animator_list = []
+                    if isinstance(animators, dict):
+                        animator_list = animators.values()
+                    elif isinstance(animators, list):
+                        animator_list = animators
+                    for animator in animator_list:
+                        if not isinstance(animator, dict):
+                            continue
+                        for kf in animator.get("keyframes", []):
+                            if not isinstance(kf, dict):
+                                continue
+                            for dp in kf.get("data_points", []):
+                                if isinstance(dp, dict):
+                                    s = dp.get("script", "")
+                                    if isinstance(s, str) and (re.search(r'(?:KeySound|sound)\s*\(\s*["\'][^"\']*\.cry["\']\s*\)', s, re.IGNORECASE) or re.search(r'["\'][^"\']*\.cry["\']', s, re.IGNORECASE)):
+                                        return True
+                                    eff = dp.get("effect", "")
+                                    if isinstance(eff, str) and ".cry" in eff:
+                                        return True
+                    return False
+
+                cry_inst_script = f'KeySound("pokemon.{base_cry_name}.cry");'
+
+                if cry_anim is not None:
+                    if not has_cry_inst(cry_anim):
+                        animators = cry_anim.get("animators")
+                        target_effects = None
+                        if isinstance(animators, dict):
+                            for k, anim_entry in animators.items():
+                                if isinstance(anim_entry, dict) and (anim_entry.get("type") == "effect" or k == "effects"):
+                                    target_effects = anim_entry
+                                    break
+                            if target_effects is None:
+                                target_effects = {
+                                    "name": "Effects",
+                                    "type": "effect",
+                                    "keyframes": []
+                                }
+                                animators["effects"] = target_effects
+                        elif isinstance(animators, list):
+                            for anim_entry in animators:
+                                if isinstance(anim_entry, dict) and anim_entry.get("type") == "effect":
+                                    target_effects = anim_entry
+                                    break
+                            if target_effects is None:
+                                target_effects = {
+                                    "name": "Effects",
+                                    "type": "effect",
+                                    "keyframes": []
+                                }
+                                animators.append(target_effects)
+                        else:
+                            target_effects = {
+                                "name": "Effects",
+                                "type": "effect",
+                                "keyframes": []
+                            }
+                            cry_anim["animators"] = {"effects": target_effects}
+
+                        target_effects.setdefault("keyframes", []).append({
+                            "channel": "timeline",
+                            "data_points": [{"script": cry_inst_script}],
+                            "uuid": str(uuid.uuid4()),
+                            "time": 0.0,
+                            "color": -1,
+                            "interpolation": "linear"
+                        })
+                        target_effects["keyframes"].sort(key=lambda k: k.get("time", 0.0) if isinstance(k, dict) else 0.0)
+                        modified_json = True
+                else:
+                    new_cry_anim = {
+                        "uuid": str(uuid.uuid4()),
+                        "name": "cry",
+                        "loop": "once",
+                        "override": False,
+                        "length": 1,
+                        "snapping": 24,
+                        "selected": False,
+                        "animators": {
+                            "effects": {
+                                "name": "Effects",
+                                "type": "effect",
+                                "keyframes": [
+                                    {
+                                        "channel": "timeline",
+                                        "data_points": [
+                                            {
+                                                "script": cry_inst_script
+                                            }
+                                        ],
+                                        "uuid": str(uuid.uuid4()),
+                                        "time": 0.0,
+                                        "color": -1,
+                                        "interpolation": "linear",
+                                    }
+                                ],
+                            }
+                        },
+                    }
+                    model_data["animations"].append(new_cry_anim)
+                    modified_json = True
+
+                if baking_enabled:
+                    bake_rate = self.bake_rate_var.get()
+                    bake_interp = self.bake_interp_var.get()
+                    bake_report = bake_model_animations(model_data, rate=bake_rate, interpolation=bake_interp)
+                    if bake_report:
+                        modified_json = True
+
+                if self.fixes_vars["prune_empty"].get():
+                    kfs_pruned, anims_pruned, ch_pruned = optimize_model_data(model_data)
+                    if kfs_pruned > 0 or anims_pruned > 0 or ch_pruned > 0:
+                        modified_json = True
                     
                 fixedmodel = json.dumps(model_data, separators=(',', ':'), ensure_ascii=False)
             except Exception as e:
@@ -3057,7 +3080,6 @@ class AvatarBuilderApp:
             with open(model_path, "w", encoding="utf-8") as model_f:
                 model_f.write(fixedmodel)
 
-            # 3. Write config.lua
             config_path = os.path.join(self.base_path, "config.lua")
             if not os.path.exists(config_path):
                 self.show_status("Error: config.lua not found in avatar folder.", "red")
@@ -3077,7 +3099,6 @@ class AvatarBuilderApp:
             config_content = re.sub(r'customcry\s*=\s*(true|false)', f'customcry = {customcry_val}', config_content)
             config_content = re.sub(r'crosshairAdjust\s*=\s*(true|false)', f'crosshairAdjust = {crosshair_val}', config_content)
 
-            # Helper for replacing Lua variables, especially tables with nested braces
             def replace_lua_var(content, var_name, new_val_str):
                 m = re.search(r'(' + re.escape(var_name) + r'\s*=\s*)', content)
                 if not m:
@@ -3103,7 +3124,6 @@ class AvatarBuilderApp:
                     end_idx = (actual_start + end_m.start()) if end_m else len(content)
                     return content[:m.start()] + f"{var_name} = " + new_val_str + content[end_idx:], True
 
-            # Format and inject Animated Textures (only if supported by template)
             if re.search(r'\banimatedParts\b', config_content):
                 parts_lua = "nil"
                 if self.anim_textures_data:
@@ -3117,7 +3137,6 @@ class AvatarBuilderApp:
                         parts_lua += f'\t\t\t{{\n\t\t\t\tpart = {ip},\n\t\t\t\tanimtexname = "{it}",\n\t\t\t\tframenumber = {ifm},\n\t\t\t\tanimfps = {ifps},\n\t\t\t\tanimemissive = {iem}\n\t\t\t}},\n'
                     parts_lua += "\t\t}"
 
-                # If older legacy standalone variables exist alongside animatedParts, clean them out
                 if "animatedPart =" in config_content:
                     config_content = re.sub(r'(\s*--[^\n\r]*\n)*\s*animatedPart\s*=[^\n\r]*\n', '', config_content)
                     config_content = re.sub(r'(\s*--[^\n\r]*\n)*\s*animtexname\s*=[^\n\r]*\n', '', config_content)
@@ -3127,7 +3146,6 @@ class AvatarBuilderApp:
 
                 config_content, _ = replace_lua_var(config_content, "animatedParts", parts_lua)
 
-            # Format and inject Quirks
             if "require(\"Pokemon.quirks\")[1]" in config_content or "require('Pokemon.quirks')[1]" in config_content:
                 parts = re.split(r'(local\s+addquirk\s*=\s*require\(["\']Pokemon\.quirks["\']\)\[1\])', config_content)
                 if len(parts) >= 3:
@@ -3162,10 +3180,12 @@ class AvatarBuilderApp:
             if self.customcry_var.get() and self.cryfile_var.get():
                 cry_src = self.cryfile_var.get()
                 if os.path.exists(cry_src):
-                    cry_dst = os.path.join(self.base_path, f"{modelname}_cry.ogg")
+                    base_cry_name = modelname.split("_")[0]
+                    cry_dst = os.path.join(self.base_path, f"{base_cry_name}_cry.ogg")
                     try:
                         if os.path.abspath(cry_src) != os.path.abspath(cry_dst):
                             shutil.copy2(cry_src, cry_dst)
+                        self.cryfile_var.set(cry_dst)
                     except shutil.SameFileError:
                         pass
 
