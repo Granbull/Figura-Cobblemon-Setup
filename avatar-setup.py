@@ -1065,13 +1065,15 @@ class AvatarBuilderApp:
     def setup_ui(self):
         main_input_frame = tk.Frame(self.root)
         main_input_frame.pack(pady=(15, 5))
+        main_input_frame.columnconfigure(0, weight=1)
+        main_input_frame.columnconfigure(1, weight=0)
         
         lbl_model = tk.Label(main_input_frame, text="Select .bbmodel:")
         lbl_model.grid(row=0, column=0, columnspan=2, pady=(0, 2))
         
         self.model_var = tk.StringVar()
-        self.model_cb = ttk.Combobox(main_input_frame, textvariable=self.model_var, state="readonly", width=30)
-        self.model_cb.grid(row=1, column=0, sticky="w", padx=(0, 5))
+        self.model_cb = ttk.Combobox(main_input_frame, textvariable=self.model_var, state="readonly")
+        self.model_cb.grid(row=1, column=0, sticky="ew", padx=(0, 5))
         self.model_cb.bind("<<ComboboxSelected>>", self.on_model_select)
         btn_refresh = tk.Button(main_input_frame, text="Refresh", command=self.refresh_models, width=8)
         btn_refresh.grid(row=1, column=1)
@@ -1101,8 +1103,8 @@ class AvatarBuilderApp:
         lbl_poser.grid(row=6, column=0, columnspan=2, pady=(8, 2))
         
         self.poser_var = tk.StringVar()
-        self.poser_cb = ttk.Combobox(main_input_frame, textvariable=self.poser_var, state="readonly", width=30)
-        self.poser_cb.grid(row=7, column=0, sticky="w", padx=(0, 5))
+        self.poser_cb = ttk.Combobox(main_input_frame, textvariable=self.poser_var, state="readonly")
+        self.poser_cb.grid(row=7, column=0, sticky="ew", padx=(0, 5))
         btn_poser_auto = tk.Button(main_input_frame, text="Auto", command=self.auto_detect_poser, width=8)
         btn_poser_auto.grid(row=7, column=1)
 
@@ -1113,13 +1115,13 @@ class AvatarBuilderApp:
         lbl_head.grid(row=8, column=0, columnspan=2, pady=(8, 2))
         
         head_inner_frame = tk.Frame(main_input_frame)
-        head_inner_frame.grid(row=9, column=0, sticky="w", padx=(0, 5))
+        head_inner_frame.grid(row=9, column=0, sticky="ew", padx=(0, 5))
         
         self.head_prefix_var = tk.StringVar()
         tk.Label(head_inner_frame, textvariable=self.head_prefix_var, fg="gray").pack(side=tk.LEFT)
         self.head_var = tk.StringVar()
-        head_entry = tk.Entry(head_inner_frame, textvariable=self.head_var, width=18)
-        head_entry.pack(side=tk.LEFT)
+        head_entry = tk.Entry(head_inner_frame, textvariable=self.head_var)
+        head_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
         
         btn_head_auto = tk.Button(main_input_frame, text="Auto", command=self.auto_find_head_path, width=8)
         btn_head_auto.grid(row=9, column=1)
@@ -1850,15 +1852,23 @@ class AvatarBuilderApp:
         if head_match:
             head_val = head_match.group(1).strip()
             if "NAME_HERE" not in head_val and "PATH.TO.HEAD" not in head_val:
-                prefix = self.head_prefix_var.get()
-                prefix_no_dot = prefix[:-1] if prefix.endswith(".") else prefix
-                if head_val.startswith(prefix):
-                    self.head_var.set(head_val[len(prefix):])
-                elif head_val.startswith(prefix_no_dot):
-                    self.head_var.set(head_val[len(prefix_no_dot):])
+                clean_head = head_val.strip("[]\"' ")
+                if clean_head.upper() in ("NONE", "NIL"):
+                    self.head_var.set("")
                 else:
-                    stripped = re.sub(r'^models(?:\[["\'].*?["\']\]|\.[a-zA-Z0-9_-]+)\.?', '', head_val)
-                    self.head_var.set(stripped)
+                    prefix = self.head_prefix_var.get()
+                    prefix_no_dot = prefix[:-1] if prefix.endswith(".") else prefix
+                    if head_val.startswith(prefix):
+                        val = head_val[len(prefix):]
+                    elif head_val.startswith(prefix_no_dot):
+                        val = head_val[len(prefix_no_dot):]
+                    else:
+                        val = re.sub(r'^models(?:\[["\'].*?["\']\]|\.[a-zA-Z0-9_-]+)\.?', '', head_val)
+                    
+                    if val.strip("[]\"' ").upper() in ("NONE", "NIL"):
+                        self.head_var.set("")
+                    else:
+                        self.head_var.set(val)
 
         def set_str_var(var, pattern):
             m = re.search(pattern, config_content)
@@ -2029,7 +2039,8 @@ class AvatarBuilderApp:
                 return
 
             target_input = self.head_var.get().strip()
-            original_target = target_input if target_input else "head"
+            clean_target = target_input.strip("[]\"' ")
+            original_target = target_input if (clean_target and clean_target.upper() != "NONE") else "head"
 
             display_target = original_target
             if display_target.endswith("]"):
@@ -2639,7 +2650,7 @@ class AvatarBuilderApp:
         pokename = modelname.replace("_", " ").title()
         
         head_suffix = self.head_var.get().strip()
-        if not head_suffix:
+        if not head_suffix or head_suffix.strip("[]\"' ").upper() in ("NONE", "NIL"):
             headpath = '"NONE"'
         else:
             prefix = self.head_prefix_var.get()
@@ -3152,7 +3163,18 @@ class AvatarBuilderApp:
                     after_quirks_sec = parts[2]
                     ret_split = re.split(r'(return\s+config)', after_quirks_sec)
                     if len(ret_split) >= 2:
-                        new_quirks_str = "\n\t--quirk info can be found at common/src/main/kotlin/com/cobblemon/mod/common/client/render/models/blockbench/pokemon/genX/[Pokemon]Model.kt\n\t--how to translate that info into what addquirk wants can be found in quirk.png\n\t--addquirk(name, animation, min, max, pose)\n"
+                        quirks_body = ret_split[0]
+                        return_stmt = ret_split[1] + (ret_split[2] if len(ret_split) > 2 else "")
+                        
+                        preserved_lines = []
+                        for line in quirks_body.splitlines():
+                            stripped = line.strip()
+                            if not re.match(r'^addquirk\s*\(', stripped):
+                                preserved_lines.append(line)
+                                
+                        header = "\n".join(preserved_lines).rstrip()
+                        
+                        quirk_lines = []
                         for q in self.quirks_data:
                             q_name = q['name']
                             raw_anim = q.get('anim') or q_name
@@ -3166,12 +3188,23 @@ class AvatarBuilderApp:
                             max_s = fmt_num(q_max)
 
                             if q_pose:
-                                new_quirks_str += f'\taddquirk("{q_name}", {q_anim}, {min_s}, {max_s}, {q_pose})\n'
+                                quirk_lines.append(f'\taddquirk("{q_name}", {q_anim}, {min_s}, {max_s}, {q_pose})')
                             elif q_min != 8.0 or q_max != 30.0:
-                                new_quirks_str += f'\taddquirk("{q_name}", {q_anim}, {min_s}, {max_s})\n'
+                                quirk_lines.append(f'\taddquirk("{q_name}", {q_anim}, {min_s}, {max_s})')
                             else:
-                                new_quirks_str += f'\taddquirk("{q_name}", {q_anim})\n'
-                        config_content = before_quirks + new_quirks_str + "\n" + ret_split[-2] + (ret_split[-1] if len(ret_split) > 2 else "")
+                                quirk_lines.append(f'\taddquirk("{q_name}", {q_anim})')
+
+                        quirk_calls = "\n".join(quirk_lines)
+                        if header and quirk_calls:
+                            new_sec = header + "\n" + quirk_calls + "\n\n"
+                        elif quirk_calls:
+                            new_sec = "\n" + quirk_calls + "\n\n"
+                        elif header:
+                            new_sec = header + "\n\n"
+                        else:
+                            new_sec = "\n\n"
+
+                        config_content = before_quirks + new_sec + return_stmt
 
             with open(config_path, 'w', encoding="utf-8") as f:
                 f.write(config_content)
